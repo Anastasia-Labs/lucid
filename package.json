@@ -1,8 +1,15 @@
 {
-  "name": "lucid-cardano",
+  "name": "@anastasia-labs/lucid-cardano",
   "version": "0.10.7",
   "license": "MIT",
   "author": "Alessandro Konrad",
-  "description": "Lucid is a library, which allows you to create Cardano transactions and off-chain code for your Plutus contracts in JavaScript, Deno and Node.js.",
-  "repository": "https://github.com/spacebudz/lucid"
+  "description": "Lucid fork , which allows to export portable type annotations",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anastasia-labs/lucid.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anastasia-labs/lucid/issues"
+  },
+  "homepage": "https://github.com/anastasia-labs/lucid#readme"
 }
