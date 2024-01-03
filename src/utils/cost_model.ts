@@ -2,22 +2,30 @@ import { C } from "../core/mod.ts";
 import { CostModels } from "../mod.ts";
 import { ProtocolParameters } from "../types/types.ts";
 
-export function createCostModels(costModels: CostModels): C.Costmdls {
-  const costmdls = C.Costmdls.new();
+export function createCostModels(costModels: CostModels): C.CostModels {
+  const costmdls = C.CostModels.new();
 
   // add plutus v1
-  const costmdlV1 = C.CostModel.new();
-  Object.values(costModels.PlutusV1).forEach((cost, index) => {
-    costmdlV1.set(index, C.Int.new(C.BigNum.from_str(cost.toString())));
-  });
-  costmdls.insert(C.Language.new_plutus_v1(), costmdlV1);
+  const costmdlV1 = C.IntList.new();
+  Object.values(costModels.PlutusV2).forEach((cost) => {
+    costmdlV1.add(C.Int.new(BigInt(cost)))
+  })
+  costmdls.set_plutus_v1(costmdlV1)
+
 
   // add plutus v2
-  const costmdlV2 = C.CostModel.new_plutus_v2();
-  Object.values(costModels.PlutusV2 || []).forEach((cost, index) => {
-    costmdlV2.set(index, C.Int.new(C.BigNum.from_str(cost.toString())));
+  const costmdlV2 = C.IntList.new()
+  Object.values(costModels.PlutusV2).forEach((cost) => {
+    costmdlV2.add(C.Int.new(BigInt(cost)))
   });
-  costmdls.insert(C.Language.new_plutus_v2(), costmdlV2);
+  costmdls.set_plutus_v2(costmdlV2)
+
+  // add plutus v3
+  // const costmdlV3 = C.IntList.new()
+  // Object.values(costModels.PlutusV3).forEach((cost) => {
+  //   costmdlV3.add(C.Int.new(BigInt(cost)))
+  // });
+  // costmdls.set_plutus_v3(costmdlV3)
 
   return costmdls;
 }

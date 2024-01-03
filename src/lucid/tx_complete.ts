@@ -1,4 +1,5 @@
 import { C } from "../core/mod.ts";
+import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
 import {
   Credential,
   PrivateKey,
@@ -20,8 +21,8 @@ import { Tx } from "./tx.ts";
 import { TxSigned } from "./tx_signed.ts";
 
 export class TxComplete {
-  txComplete: C.Transaction;
-  witnessSetBuilder: C.TransactionWitnessSetBuilder;
+  txComplete: CML.Transaction;
+  witnessSetBuilder: CML.TransactionWitnessSetBuilder;
   private tasks: (() => Promise<void>)[];
   /** Stores the available input utxo set for this tx (for tx chaining), if undefined falls back to wallet utxos */
   private utxos?: UTxO[];
@@ -29,21 +30,21 @@ export class TxComplete {
   fee: number;
   exUnits: { cpu: number; mem: number } | null = null;
 
-  constructor(lucid: Lucid, tx: C.Transaction, utxos?: UTxO[]) {
+  constructor(lucid: Lucid, tx: CML.Transaction, utxos?: UTxO[]) {
     this.lucid = lucid;
     this.txComplete = tx;
-    this.witnessSetBuilder = C.TransactionWitnessSetBuilder.new();
+    this.witnessSetBuilder = CML.TransactionWitnessSetBuilder.new();
     this.tasks = [];
     this.utxos = utxos;
 
-    this.fee = parseInt(tx.body().fee().to_str());
+    this.fee = parseInt(tx.body().fee().toString());
     const redeemers = tx.witness_set().redeemers();
     if (redeemers) {
       const exUnits = { cpu: 0, mem: 0 };
       for (let i = 0; i < redeemers.len(); i++) {
         const redeemer = redeemers.get(i);
-        exUnits.cpu += parseInt(redeemer.ex_units().steps().to_str());
-        exUnits.mem += parseInt(redeemer.ex_units().mem().to_str());
+        exUnits.cpu += parseInt(redeemer.ex_units().steps().toString());
+        exUnits.mem += parseInt(redeemer.ex_units().mem().toString());
       }
       this.exUnits = exUnits;
     }
@@ -58,11 +59,9 @@ export class TxComplete {
 
   /** Add an extra signature from a private key. */
   signWithPrivateKey(privateKey: PrivateKey): TxComplete {
-    const priv = C.PrivateKey.from_bech32(privateKey);
-    const witness = C.make_vkey_witness(
-      C.hash_transaction(this.txComplete.body()),
-      priv,
-    );
+    const priv = CML.PrivateKey.from_bech32(privateKey);
+    const signed = priv.sign(this.txComplete.to_cbor_bytes())
+    const witness = CML.Vkeywitness.new(priv.to_public(),signed)
     this.witnessSetBuilder.add_vkey(witness);
     return this;
   }
@@ -71,7 +70,7 @@ export class TxComplete {
   async partialSign(): Promise<TransactionWitnesses> {
     const witnesses = await this.lucid.wallet.signTx(this.txComplete);
     this.witnessSetBuilder.add_existing(witnesses);
-    return toHex(witnesses.to_bytes());
+    return witnesses.to_cbor_hex();
   }
 
   /**
@@ -79,22 +78,24 @@ export class TxComplete {
    * Add an extra signature from a private key.
    */
   partialSignWithPrivateKey(privateKey: PrivateKey): TransactionWitnesses {
-    const priv = C.PrivateKey.from_bech32(privateKey);
-    const witness = C.make_vkey_witness(
-      C.hash_transaction(this.txComplete.body()),
-      priv,
-    );
+    const priv = CML.PrivateKey.from_bech32(privateKey);
+    const signed = priv.sign(this.txComplete.to_cbor_bytes())
+    const witness = CML.Vkeywitness.new(priv.to_public(),signed)
+    // const witness = C.make_vkey_witness(
+    //   C.hash_transaction(this.txComplete.body()),
+    //   priv,
+    // );
     this.witnessSetBuilder.add_vkey(witness);
-    const witnesses = C.TransactionWitnessSetBuilder.new();
+    const witnesses = CML.TransactionWitnessSetBuilder.new();
     witnesses.add_vkey(witness);
-    return toHex(witnesses.build().to_bytes());
+    return witnesses.build().to_cbor_hex();
   }
 
   /** Sign the transaction with the given witnesses. */
   assemble(witnesses: TransactionWitnesses[]): TxComplete {
     witnesses.forEach((witness) => {
-      const witnessParsed = C.TransactionWitnessSet.from_bytes(
-        fromHex(witness),
+      const witnessParsed = CML.TransactionWitnessSet.from_cbor_hex(
+        witness,
       );
       this.witnessSetBuilder.add_existing(witnessParsed);
     });
@@ -107,9 +108,10 @@ export class TxComplete {
     }
 
     this.witnessSetBuilder.add_existing(this.txComplete.witness_set());
-    const signedTx = C.Transaction.new(
+    const signedTx = CML.Transaction.new(
       this.txComplete.body(),
       this.witnessSetBuilder.build(),
+      true,
       this.txComplete.auxiliary_data(),
     );
     return new TxSigned(this.lucid, signedTx);
@@ -117,12 +119,12 @@ export class TxComplete {
 
   /** Return the transaction in Hex encoded Cbor. */
   toString(): Transaction {
-    return toHex(this.txComplete.to_bytes());
+    return this.txComplete.to_cbor_hex();
   }
 
   /** Return the transaction hash. */
   toHash(): TxHash {
-    return C.hash_transaction(this.txComplete.body()).to_hex();
+    return C.TransactionHash.from_bytes(this.txComplete.body().to_cbor_bytes()).to_hex();
   }
 
   /**

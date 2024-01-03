@@ -1,29 +1,30 @@
 import { C } from "../core/mod.ts";
+import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
 import { Transaction, TxHash } from "../types/mod.ts";
 import { Lucid } from "./lucid.ts";
 import { toHex } from "../utils/mod.ts";
 
 export class TxSigned {
-  txSigned: C.Transaction;
+  txSigned: CML.Transaction;
   private lucid: Lucid;
-  constructor(lucid: Lucid, tx: C.Transaction) {
+  constructor(lucid: Lucid, tx: CML.Transaction) {
     this.lucid = lucid;
     this.txSigned = tx;
   }
 
   async submit(): Promise<TxHash> {
     return await (this.lucid.wallet || this.lucid.provider).submitTx(
-      toHex(this.txSigned.to_bytes()),
+      this.txSigned.to_cbor_hex(),
     );
   }
 
   /** Returns the transaction in Hex encoded Cbor. */
   toString(): Transaction {
-    return toHex(this.txSigned.to_bytes());
+    return this.txSigned.to_cbor_hex();
   }
 
   /** Return the transaction hash. */
   toHash(): TxHash {
-    return C.hash_transaction(this.txSigned.body()).to_hex();
+    return CML.TransactionHash.from_raw_bytes(this.txSigned.body().to_cbor_bytes()).to_hex();
   }
 }

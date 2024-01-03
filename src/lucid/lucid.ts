@@ -1,4 +1,5 @@
 import { C } from "../core/mod.ts";
+import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
 import { signData, verifyData } from "../misc/sign_data.ts";
 import { discoverOwnUsedTxKeyHashes, walletFromSeed } from "../misc/wallet.ts";
 import { Constr, Data } from "../plutus/data.ts";
@@ -42,7 +43,7 @@ import { Tx } from "./tx.ts";
 import { TxComplete } from "./tx_complete.ts";
 
 export class Lucid {
-  txBuilderConfig!: C.TransactionBuilderConfig;
+  txBuilderConfig!: CML.TransactionBuilderConfig;
   wallet!: Wallet;
   provider!: Provider;
   network: Network = "Mainnet";
@@ -65,53 +66,55 @@ export class Lucid {
       }
 
       const slotConfig = SLOT_CONFIG_NETWORK[lucid.network];
-      lucid.txBuilderConfig = C.TransactionBuilderConfigBuilder.new()
-        .coins_per_utxo_byte(
-          C.BigNum.from_str(protocolParameters.coinsPerUtxoByte.toString()),
-        )
+      lucid.txBuilderConfig = CML.TransactionBuilderConfigBuilder.new()
         .fee_algo(
-          C.LinearFee.new(
-            C.BigNum.from_str(protocolParameters.minFeeA.toString()),
-            C.BigNum.from_str(protocolParameters.minFeeB.toString()),
+          CML.LinearFee.new(
+            BigInt(protocolParameters.minFeeA),
+            BigInt(protocolParameters.minFeeB),
           ),
         )
-        .key_deposit(
-          C.BigNum.from_str(protocolParameters.keyDeposit.toString()),
+        .coins_per_utxo_byte(
+          protocolParameters.coinsPerUtxoByte
         )
         .pool_deposit(
-          C.BigNum.from_str(protocolParameters.poolDeposit.toString()),
+          protocolParameters.poolDeposit,
         )
-        .max_tx_size(protocolParameters.maxTxSize)
+        .key_deposit(
+          protocolParameters.keyDeposit,
+        )
         .max_value_size(protocolParameters.maxValSize)
+        .max_tx_size(protocolParameters.maxTxSize)
+        .ex_unit_prices(
+          CML.ExUnitPrices.new(
+            CML.Rational.new(BigInt(protocolParameters.priceMem),1n),
+            CML.Rational.new(BigInt(protocolParameters.priceStep),1n),
+          ),
+        )
         .collateral_percentage(protocolParameters.collateralPercentage)
         .max_collateral_inputs(protocolParameters.maxCollateralInputs)
-        .max_tx_ex_units(
-          C.ExUnits.new(
-            C.BigNum.from_str(protocolParameters.maxTxExMem.toString()),
-            C.BigNum.from_str(protocolParameters.maxTxExSteps.toString()),
-          ),
-        )
-        .ex_unit_prices(
-          C.ExUnitPrices.from_float(
-            protocolParameters.priceMem,
-            protocolParameters.priceStep,
-          ),
-        )
-        .slot_config(
-          C.BigNum.from_str(slotConfig.zeroTime.toString()),
-          C.BigNum.from_str(slotConfig.zeroSlot.toString()),
-          slotConfig.slotLength,
-        )
-        .blockfrost(
-          // We have Aiken now as native plutus core engine (primary), but we still support blockfrost (secondary) in case of bugs.
-          C.Blockfrost.new(
-            // deno-lint-ignore no-explicit-any
-            ((provider as any)?.url || "") + "/utils/txs/evaluate",
-            // deno-lint-ignore no-explicit-any
-            (provider as any)?.projectId || "",
-          ),
-        )
-        .costmdls(createCostModels(protocolParameters.costModels))
+        // .max_tx_ex_units(
+        //   CML.ExUnits.new(
+        //     CML.BigNum.from_str(protocolParameters.maxTxExMem.toString()),
+        //     CML.BigNum.from_str(protocolParameters.maxTxExSteps.toString()),
+        //   ),
+        // )
+        // .slot_config(
+        //   CML.BigNum.from_str(slotConfig.zeroTime.toString()),
+        //   CML.BigNum.from_str(slotConfig.zeroSlot.toString()),
+        //   slotConfig.slotLength,
+        // )
+        // .blockfrost(
+        //   // We have Aiken now as native plutus core engine (primary), but we still support blockfrost (secondary) in case of bugs.
+        //   CML.Blockfrost.new(
+        //     // deno-lint-ignore no-explicit-any
+        //     ((provider as any)?.url || "") + "/utils/txs/evaluate",
+        //     // deno-lint-ignore no-explicit-any
+        //     (provider as any)?.projectId || "",
+        //   ),
+        // )
+        .cost_models(createCostModels(protocolParameters.costModels))
+        .collateral_percentage(protocolParameters.collateralPercentage)
+        .max_collateral_inputs(protocolParameters.maxCollateralInputs)
         .build();
     }
     lucid.utils = new Utils(lucid);
@@ -142,7 +145,7 @@ export class Lucid {
   }
 
   fromTx(tx: Transaction): TxComplete {
-    return new TxComplete(this, C.Transaction.from_bytes(fromHex(tx)));
+    return new TxComplete(this, CML.Transaction.from_cbor_hex(tx));
   }
 
   /** Signs a message. Expects the payload to be Hex encoded. */
@@ -229,15 +232,15 @@ export class Lucid {
    * Only an Enteprise address (without stake credential) is derived.
    */
   selectWalletFromPrivateKey(privateKey: PrivateKey): Lucid {
-    const priv = C.PrivateKey.from_bech32(privateKey);
+    const priv = CML.PrivateKey.from_bech32(privateKey);
     const pubKeyHash = priv.to_public().hash();
 
     this.wallet = {
       // deno-lint-ignore require-await
       address: async (): Promise<Address> =>
-        C.EnterpriseAddress.new(
+        CML.EnterpriseAddress.new(
           this.network === "Mainnet" ? 1 : 0,
-          C.StakeCredential.from_keyhash(pubKeyHash),
+          CML.StakeCredential.from_keyhash(pubKeyHash),
         )
           .to_address()
           .to_bech32(undefined),
@@ -248,13 +251,13 @@ export class Lucid {
           paymentCredentialOf(await this.wallet.address()),
         );
       },
-      getUtxosCore: async (): Promise<C.TransactionUnspentOutputs> => {
+      getUtxosCore: async (): Promise<Array<CML.TransactionUnspentOutput>> => {
         const utxos = await this.utxosAt(
           paymentCredentialOf(await this.wallet.address()),
         );
-        const coreUtxos = C.TransactionUnspentOutputs.new();
+        const coreUtxos : Array<CML.TransactionUnspentOutput>= [];
         utxos.forEach((utxo) => {
-          coreUtxos.add(utxoToCore(utxo));
+          coreUtxos.push(utxoToCore(utxo));
         });
         return coreUtxos;
       },
@@ -264,13 +267,11 @@ export class Lucid {
       },
       // deno-lint-ignore require-await
       signTx: async (
-        tx: C.Transaction,
-      ): Promise<C.TransactionWitnessSet> => {
-        const witness = C.make_vkey_witness(
-          C.hash_transaction(tx.body()),
-          priv,
-        );
-        const txWitnessSetBuilder = C.TransactionWitnessSetBuilder.new();
+        tx: CML.Transaction,
+      ): Promise<CML.TransactionWitnessSet> => {
+        const signed = priv.sign(tx.to_cbor_bytes())
+        const witness = CML.Vkeywitness.new(priv.to_public(),signed)
+        const txWitnessSetBuilder = CML.TransactionWitnessSetBuilder.new();
         txWitnessSetBuilder.add_vkey(witness);
         return txWitnessSetBuilder.build();
       },
@@ -309,14 +310,14 @@ export class Lucid {
 
     this.wallet = {
       address: async (): Promise<Address> =>
-        C.Address.from_bytes(
-          fromHex(await getAddressHex()),
+        CML.Address.from_hex(
+          await getAddressHex(),
         ).to_bech32(undefined),
       rewardAddress: async (): Promise<RewardAddress | null> => {
         const [rewardAddressHex] = await api.getRewardAddresses();
         const rewardAddress = rewardAddressHex
-          ? C.RewardAddress.from_address(
-            C.Address.from_bytes(fromHex(rewardAddressHex)),
+          ? CML.RewardAddress.from_address(
+            CML.Address.from_hex(rewardAddressHex),
           )!
             .to_address()
             .to_bech32(undefined)
@@ -325,17 +326,17 @@ export class Lucid {
       },
       getUtxos: async (): Promise<UTxO[]> => {
         const utxos = ((await api.getUtxos()) || []).map((utxo) => {
-          const parsedUtxo = C.TransactionUnspentOutput.from_bytes(
+          const parsedUtxo = CML.TransactionUnspentOutput.from_cbor_bytes(
             fromHex(utxo),
           );
           return coreToUtxo(parsedUtxo);
         });
         return utxos;
       },
-      getUtxosCore: async (): Promise<C.TransactionUnspentOutputs> => {
-        const utxos = C.TransactionUnspentOutputs.new();
-        ((await api.getUtxos()) || []).forEach((utxo) => {
-          utxos.add(C.TransactionUnspentOutput.from_bytes(fromHex(utxo)));
+      getUtxosCore: async (): Promise<Array<CML.TransactionUnspentOutput>> => {
+        const utxos: Array<CML.TransactionUnspentOutput> = [];
+        ((await api.getUtxos()) || []).forEach((utxo: string) => {
+          utxos.push(CML.TransactionUnspentOutput.from_cbor_hex(utxo));
         });
         return utxos;
       },
@@ -347,16 +348,16 @@ export class Lucid {
           : { poolId: null, rewards: 0n };
       },
       signTx: async (
-        tx: C.Transaction,
-      ): Promise<C.TransactionWitnessSet> => {
-        const witnessSet = await api.signTx(toHex(tx.to_bytes()), true);
-        return C.TransactionWitnessSet.from_bytes(fromHex(witnessSet));
+        tx: CML.Transaction,
+      ): Promise<CML.TransactionWitnessSet> => {
+        const witnessSet = await api.signTx(toHex(tx.to_cbor_bytes()), true);
+        return CML.TransactionWitnessSet.from_cbor_hex(witnessSet);
       },
       signMessage: async (
         address: Address | RewardAddress,
         payload: Payload,
       ): Promise<SignedMessage> => {
-        const hexAddress = toHex(C.Address.from_bech32(address).to_bytes());
+        const hexAddress = toHex(CML.Address.from_bech32(address).to_raw_bytes());
         return await api.signData(hexAddress, payload);
       },
       submitTx: async (tx: Transaction): Promise<TxHash> => {
@@ -385,10 +386,10 @@ export class Lucid {
         const rewardAddr = !rewardAddress && addressDetails.stakeCredential
           ? (() => {
             if (addressDetails.stakeCredential.type === "Key") {
-              return C.RewardAddress.new(
+              return CML.RewardAddress.new(
                 this.network === "Mainnet" ? 1 : 0,
-                C.StakeCredential.from_keyhash(
-                  C.Ed25519KeyHash.from_hex(
+                CML.StakeCredential.from_keyhash(
+                  CML.Ed25519KeyHash.from_hex(
                     addressDetails.stakeCredential.hash,
                   ),
                 ),
@@ -396,10 +397,10 @@ export class Lucid {
                 .to_address()
                 .to_bech32(undefined);
             }
-            return C.RewardAddress.new(
+            return CML.RewardAddress.new(
               this.network === "Mainnet" ? 1 : 0,
-              C.StakeCredential.from_scripthash(
-                C.ScriptHash.from_hex(addressDetails.stakeCredential.hash),
+              CML.StakeCredential.from_scripthash(
+                CML.ScriptHash.from_hex(addressDetails.stakeCredential.hash),
               ),
             )
               .to_address()
@@ -411,10 +412,10 @@ export class Lucid {
       getUtxos: async (): Promise<UTxO[]> => {
         return utxos ? utxos : await this.utxosAt(paymentCredentialOf(address));
       },
-      getUtxosCore: async (): Promise<C.TransactionUnspentOutputs> => {
-        const coreUtxos = C.TransactionUnspentOutputs.new();
+      getUtxosCore: async (): Promise<Array<CML.TransactionUnspentOutput>> => {
+        const coreUtxos : Array<CML.TransactionUnspentOutput> = [];
         (utxos ? utxos : await this.utxosAt(paymentCredentialOf(address)))
-          .forEach((utxo) => coreUtxos.add(utxoToCore(utxo)));
+          .forEach((utxo) => coreUtxos.push(utxoToCore(utxo)));
         return coreUtxos;
       },
       getDelegation: async (): Promise<Delegation> => {
@@ -425,7 +426,7 @@ export class Lucid {
           : { poolId: null, rewards: 0n };
       },
       // deno-lint-ignore require-await
-      signTx: async (): Promise<C.TransactionWitnessSet> => {
+      signTx: async (): Promise<CML.TransactionWitnessSet> => {
         throw new Error("Not implemented");
       },
       // deno-lint-ignore require-await
@@ -461,10 +462,10 @@ export class Lucid {
       },
     );
 
-    const paymentKeyHash = C.PrivateKey.from_bech32(paymentKey).to_public()
+    const paymentKeyHash = CML.PrivateKey.from_bech32(paymentKey).to_public()
       .hash().to_hex();
     const stakeKeyHash = stakeKey
-      ? C.PrivateKey.from_bech32(stakeKey).to_public().hash().to_hex()
+      ? CML.PrivateKey.from_bech32(stakeKey).to_public().hash().to_hex()
       : "";
 
     const privKeyHashMap = {
@@ -481,10 +482,11 @@ export class Lucid {
       // deno-lint-ignore require-await
       getUtxos: async (): Promise<UTxO[]> =>
         this.utxosAt(paymentCredentialOf(address)),
-      getUtxosCore: async (): Promise<C.TransactionUnspentOutputs> => {
-        const coreUtxos = C.TransactionUnspentOutputs.new();
-        (await this.utxosAt(paymentCredentialOf(address))).forEach((utxo) =>
-          coreUtxos.add(utxoToCore(utxo))
+      getUtxosCore: async (): Promise<Array<CML.TransactionUnspentOutput>> => {
+        const utxos = await this.utxosAt(paymentCredentialOf(await this.wallet.address()))
+        const coreUtxos : Array<CML.TransactionUnspentOutput>= []
+        utxos.forEach((utxo:UTxO) =>
+          coreUtxos.push(utxoToCore(utxo))
         );
         return coreUtxos;
       },
@@ -496,8 +498,8 @@ export class Lucid {
           : { poolId: null, rewards: 0n };
       },
       signTx: async (
-        tx: C.Transaction,
-      ): Promise<C.TransactionWitnessSet> => {
+        tx: CML.Transaction,
+      ): Promise<CML.TransactionWitnessSet> => {
         const utxos = await this.utxosAt(address);
 
         const ownKeyHashes: Array<KeyHash> = [paymentKeyHash, stakeKeyHash];
@@ -508,12 +510,11 @@ export class Lucid {
           utxos,
         );
 
-        const txWitnessSetBuilder = C.TransactionWitnessSetBuilder.new();
+        const txWitnessSetBuilder = CML.TransactionWitnessSetBuilder.new();
         usedKeyHashes.forEach((keyHash) => {
-          const witness = C.make_vkey_witness(
-            C.hash_transaction(tx.body()),
-            C.PrivateKey.from_bech32(privKeyHashMap[keyHash]!),
-          );
+          const priv = CML.PrivateKey.from_bech32(privKeyHashMap[keyHash]!)
+          const signed = priv.sign(tx.to_cbor_bytes())
+          const witness = CML.Vkeywitness.new(priv.to_public(),signed)
           txWitnessSetBuilder.add_vkey(witness);
         });
         return txWitnessSetBuilder.build();

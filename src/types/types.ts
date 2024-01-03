@@ -1,5 +1,5 @@
 import { C } from "../core/mod.ts";
-
+import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
 type CostModel = Record<string, number>;
 
 export type CostModels = Record<PlutusVersion, CostModel>;
@@ -173,9 +173,9 @@ export interface Wallet {
   address(): Promise<Address>;
   rewardAddress(): Promise<RewardAddress | null>;
   getUtxos(): Promise<UTxO[]>;
-  getUtxosCore(): Promise<C.TransactionUnspentOutputs>;
+  getUtxosCore(): Promise<Array<CML.TransactionUnspentOutput>>;
   getDelegation(): Promise<Delegation>;
-  signTx(tx: C.Transaction): Promise<C.TransactionWitnessSet>;
+  signTx(tx: CML.Transaction): Promise<CML.TransactionWitnessSet>;
   signMessage(
     address: Address | RewardAddress,
     payload: Payload,

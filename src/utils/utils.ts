@@ -4,6 +4,7 @@ import {
   encodeToString,
 } from "https://deno.land/std@0.100.0/encoding/hex.ts";
 import { C } from "../core/mod.ts";
+import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
 import { Lucid, TxComplete } from "../lucid/mod.ts";
 import { generateMnemonic } from "../misc/bip39.ts";
 import { crc8 } from "../misc/crc8.ts";
@@ -432,29 +433,29 @@ export function generateSeedPhrase(): string {
   return generateMnemonic(256);
 }
 
-export function valueToAssets(value: C.Value): Assets {
+export function valueToAssets(value: CML.Value): Assets {
   const assets: Assets = {};
-  assets["lovelace"] = BigInt(value.coin().to_str());
-  const ma = value.multiasset();
+  assets["lovelace"] = value.coin();
+  const ma = value.multi_asset();
   if (ma) {
     const multiAssets = ma.keys();
     for (let j = 0; j < multiAssets.len(); j++) {
       const policy = multiAssets.get(j);
-      const policyAssets = ma.get(policy)!;
+      const policyAssets = ma.get_assets(policy)!;
       const assetNames = policyAssets.keys();
       for (let k = 0; k < assetNames.len(); k++) {
         const policyAsset = assetNames.get(k);
         const quantity = policyAssets.get(policyAsset)!;
-        const unit = toHex(policy.to_bytes()) + toHex(policyAsset.name());
-        assets[unit] = BigInt(quantity.to_str());
+        const unit = policy.to_hex() + policyAsset.to_cbor_hex();
+        assets[unit] = quantity;
       }
     }
   }
   return assets;
 }
 
-export function assetsToValue(assets: Assets): C.Value {
-  const multiAsset = C.MultiAsset.new();
+export function assetsToValue(assets: Assets): CML.Value {
+  const multiAsset = CML.MultiAsset.new();
   const lovelace = assets["lovelace"];
   const units = Object.keys(assets);
   const policies = Array.from(
@@ -466,20 +467,24 @@ export function assetsToValue(assets: Assets): C.Value {
   );
   policies.forEach((policy) => {
     const policyUnits = units.filter((unit) => unit.slice(0, 56) === policy);
-    const assetsValue = C.Assets.new();
+    const assetsValue = CML.MapAssetNameToCoin.new();
     policyUnits.forEach((unit) => {
       assetsValue.insert(
-        C.AssetName.new(fromHex(unit.slice(56))),
-        C.BigNum.from_str(assets[unit].toString()),
+        CML.AssetName.from_str(unit.slice(56)),
+        BigInt(assets[unit]),
       );
     });
-    multiAsset.insert(C.ScriptHash.from_bytes(fromHex(policy)), assetsValue);
+    multiAsset.insert_assets(CML.ScriptHash.from_hex(policy), assetsValue);
   });
-  const value = C.Value.new(
-    C.BigNum.from_str(lovelace ? lovelace.toString() : "0"),
+  const value = CML.Value.from_coin(
+    BigInt(lovelace ? lovelace : "0"),
   );
-  if (units.length > 1 || !lovelace) value.set_multiasset(multiAsset);
-  return value;
+  if (units.length > 1 || !lovelace){
+    return CML.Value.new(0n,multiAsset)
+  } 
+  else {
+    return value
+  }
 }
 
 export function fromScriptRef(scriptRef: C.ScriptRef): Script {
@@ -505,78 +510,69 @@ export function fromScriptRef(scriptRef: C.ScriptRef): Script {
   }
 }
 
-export function toScriptRef(script: Script): C.ScriptRef {
+export function toScriptRef(script: Script): CML.Script {
   switch (script.type) {
     case "Native":
-      return C.ScriptRef.new(
-        C.Script.new_native(C.NativeScript.from_bytes(fromHex(script.script))),
-      );
+        return CML.Script.new_native(CML.NativeScript.from_cbor_hex(script.script))
     case "PlutusV1":
-      return C.ScriptRef.new(
-        C.Script.new_plutus_v1(
-          C.PlutusScript.from_bytes(
-            fromHex(applyDoubleCborEncoding(script.script)),
-          ),
-        ),
-      );
+        return CML.Script.new_plutus_v1(
+          CML.PlutusV1Script.from_cbor_hex(
+            (applyDoubleCborEncoding(script.script)),
+          )
+        )
     case "PlutusV2":
-      return C.ScriptRef.new(
-        C.Script.new_plutus_v2(
-          C.PlutusScript.from_bytes(
-            fromHex(applyDoubleCborEncoding(script.script)),
-          ),
-        ),
-      );
+        return CML.Script.new_plutus_v2(
+          CML.PlutusV2Script.from_cbor_hex(
+            (applyDoubleCborEncoding(script.script)),
+          )
+        )
     default:
       throw new Error("No variant matched.");
   }
 }
 
-export function utxoToCore(utxo: UTxO): C.TransactionUnspentOutput {
-  const address: C.Address = (() => {
+export function utxoToCore(utxo: UTxO): CML.TransactionUnspentOutput {
+  const address: CML.Address = (() => {
     try {
-      return C.Address.from_bech32(utxo.address);
+      return CML.Address.from_bech32(utxo.address);
     } catch (_e) {
-      return C.ByronAddress.from_base58(utxo.address).to_address();
+      return CML.ByronAddress.from_base58(utxo.address).to_address();
     }
   })();
-  const output = C.TransactionOutput.new(address, assetsToValue(utxo.assets));
-  if (utxo.datumHash) {
-    output.set_datum(
-      C.Datum.new_data_hash(C.DataHash.from_bytes(fromHex(utxo.datumHash))),
-    );
+  const datumOption = () => {
+    if (utxo.datumHash) {
+    return CML.DatumOption.new_hash(CML.DatumHash.from_hex(utxo.datumHash))
+    }
+    // inline datum
+    if (!utxo.datumHash && utxo.datum) {
+      return CML.DatumOption.new_datum(CML.PlutusData.from_cbor_hex(utxo.datum))
+    }
   }
-  // inline datum
-  if (!utxo.datumHash && utxo.datum) {
-    output.set_datum(
-      C.Datum.new_data(
-        C.Data.new(C.PlutusData.from_bytes(fromHex(utxo.datum))),
-      ),
-    );
+  const scriptRef = () => {
+    if (utxo.scriptRef) {
+      return toScriptRef(utxo.scriptRef);
+    }
   }
+  const output = CML.TransactionOutput.new(address, assetsToValue(utxo.assets),datumOption(),scriptRef());
 
-  if (utxo.scriptRef) {
-    output.set_script_ref(toScriptRef(utxo.scriptRef));
-  }
-
-  return C.TransactionUnspentOutput.new(
-    C.TransactionInput.new(
-      C.TransactionHash.from_bytes(fromHex(utxo.txHash)),
-      C.BigNum.from_str(utxo.outputIndex.toString()),
+  return CML.TransactionUnspentOutput.new(
+    CML.TransactionInput.new(
+      CML.TransactionHash.from_hex(utxo.txHash),
+      BigInt(utxo.outputIndex),
     ),
     output,
   );
 }
-export function utxosToCores(utxos: UTxO[]): C.TransactionUnspentOutputs {
-  const result = C.TransactionUnspentOutputs.new();
-  utxos.map(utxoToCore).forEach((utxo) => result.add(utxo));
+export function utxosToCores(utxos: UTxO[]): Array<CML.TransactionUnspentOutput> {
+  const result : Array<CML.TransactionUnspentOutput>= [];
+  utxos.map(utxoToCore).forEach((utxo) => result.push(utxo));
   return result;
 }
 
-export function coreToUtxo(coreUtxo: C.TransactionUnspentOutput): UTxO {
+export function coreToUtxo(coreUtxo: CML.TransactionUnspentOutput): UTxO {
   return {
-    ...coreToOutRef(coreUtxo.input()),
-    ...coreToTxOutput(coreUtxo.output()),
+    ...coreToOutRef(CML.TransactionInput.from_cbor_hex(coreUtxo.to_cbor_hex())),
+    ...coreToTxOutput(CML.TransactionOutput.from_cbor_hex(coreUtxo.to_cbor_hex())),
   };
 }
 
@@ -588,22 +584,22 @@ export function coresToUtxos(utxos: C.TransactionUnspentOutputs): UTxO[] {
   return result;
 }
 
-export function coreToOutRef(input: C.TransactionInput): OutRef {
+export function coreToOutRef(input: CML.TransactionInput): OutRef {
   return {
-    txHash: toHex(input.transaction_id().to_bytes()),
-    outputIndex: parseInt(input.index().to_str()),
+    txHash: input.transaction_id().to_hex(),
+    outputIndex: parseInt(input.index().toString()),
   };
 }
 
-export function coresToOutRefs(inputs: C.TransactionInputs): OutRef[] {
+export function coresToOutRefs(inputs: Array<CML.TransactionInput>): OutRef[] {
   const result: OutRef[] = [];
-  for (let i = 0; i < inputs.len(); i++) {
-    result.push(coreToOutRef(inputs.get(i)));
+  for (let i = 0; i < inputs.length; i++) {
+    result.push(coreToOutRef(inputs[i]));
   }
   return result;
 }
 
-export function coreToTxOutput(output: C.TransactionOutput): TxOutput {
+export function coreToTxOutput(output: CML.TransactionOutput): TxOutput {
   return {
     assets: valueToAssets(output.amount()),
     address: output.address().as_byron()
@@ -616,10 +612,10 @@ export function coreToTxOutput(output: C.TransactionOutput): TxOutput {
   };
 }
 
-export function coresToTxOutputs(outputs: C.TransactionOutputs): TxOutput[] {
+export function coresToTxOutputs(outputs: Array<CML.TransactionOutput>): TxOutput[] {
   const result: TxOutput[] = [];
-  for (let i = 0; i < outputs.len(); i++) {
-    result.push(coreToTxOutput(outputs.get(i)));
+  for (let i = 0; i < outputs.length; i++) {
+    result.push(coreToTxOutput(outputs[i]));
   }
   return result;
 }
