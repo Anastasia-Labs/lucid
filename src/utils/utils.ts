@@ -487,23 +487,23 @@ export function assetsToValue(assets: Assets): CML.Value {
   }
 }
 
-export function fromScriptRef(scriptRef: C.ScriptRef): Script {
-  const kind = scriptRef.get().kind();
+export function fromScriptRef(scriptRef: CML.Script): Script {
+  const kind = scriptRef.kind()
   switch (kind) {
     case 0:
       return {
         type: "Native",
-        script: toHex(scriptRef.get().as_native()!.to_bytes()),
+        script: scriptRef.as_native()!.to_cbor_hex()
       };
     case 1:
       return {
         type: "PlutusV1",
-        script: toHex(scriptRef.get().as_plutus_v1()!.to_bytes()),
+        script: scriptRef.as_plutus_v1()!.to_cbor_hex()
       };
     case 2:
       return {
         type: "PlutusV2",
-        script: toHex(scriptRef.get().as_plutus_v2()!.to_bytes()),
+        script: scriptRef.as_plutus_v2()!.to_cbor_hex()
       };
     default:
       throw new Error("No variant matched.");
@@ -576,10 +576,10 @@ export function coreToUtxo(coreUtxo: CML.TransactionUnspentOutput): UTxO {
   };
 }
 
-export function coresToUtxos(utxos: C.TransactionUnspentOutputs): UTxO[] {
+export function coresToUtxos(utxos: Array<CML.TransactionUnspentOutput>): UTxO[] {
   const result: UTxO[] = [];
-  for (let i = 0; i < utxos.len(); i++) {
-    result.push(coreToUtxo(utxos.get(i)));
+  for (let i = 0; i < utxos.length; i++) {
+    result.push(coreToUtxo(utxos[i]));
   }
   return result;
 }
@@ -602,13 +602,10 @@ export function coresToOutRefs(inputs: Array<CML.TransactionInput>): OutRef[] {
 export function coreToTxOutput(output: CML.TransactionOutput): TxOutput {
   return {
     assets: valueToAssets(output.amount()),
-    address: output.address().as_byron()
-      ? output.address().as_byron()?.to_base58()!
-      : output.address().to_bech32(undefined),
-    datumHash: output.datum()?.as_data_hash()?.to_hex(),
-    datum: output.datum()?.as_data() &&
-      toHex(output.datum()!.as_data()!.get().to_bytes()),
-    scriptRef: output.script_ref() && fromScriptRef(output.script_ref()!),
+    address: output.address().to_bech32(undefined),
+    datumHash: output.datum()?.as_hash()?.to_hex(),
+    datum: output.datum()?.as_datum()?.to_cbor_hex(),
+    scriptRef: output.script_ref() && fromScriptRef(output.script_ref()!)
   };
 }
 
@@ -623,7 +620,9 @@ export function coresToTxOutputs(outputs: Array<CML.TransactionOutput>): TxOutpu
 export function producedUtxosFrom(unsignedTx: TxComplete): UTxO[] {
   const result: UTxO[] = [];
   const hash = unsignedTx.toHash();
-  coresToTxOutputs(unsignedTx.txComplete.body().outputs()).forEach(
+  const outputs = unsignedTx.txComplete.body().outputs()
+  const outputsArray = new Array<CML.TransactionOutput>(outputs.len()).map((_,index) => outputs.get(index))
+  coresToTxOutputs(outputsArray).forEach(
     (output, index) => {
       result.push({
         outputIndex: index,
