@@ -1,5 +1,5 @@
 import { C } from "../core/mod.ts";
-import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
+import { CML } from "../core/mod.ts"
 import { signData, verifyData } from "../misc/sign_data.ts";
 import { discoverOwnUsedTxKeyHashes, walletFromSeed } from "../misc/wallet.ts";
 import { Constr, Data } from "../plutus/data.ts";
@@ -240,7 +240,7 @@ export class Lucid {
       address: async (): Promise<Address> =>
         CML.EnterpriseAddress.new(
           this.network === "Mainnet" ? 1 : 0,
-          CML.StakeCredential.from_keyhash(pubKeyHash),
+          CML.Credential.new_pub_key(pubKeyHash),
         )
           .to_address()
           .to_bech32(undefined),
@@ -388,7 +388,7 @@ export class Lucid {
             if (addressDetails.stakeCredential.type === "Key") {
               return CML.RewardAddress.new(
                 this.network === "Mainnet" ? 1 : 0,
-                CML.StakeCredential.from_keyhash(
+                CML.Credential.new_pub_key(
                   CML.Ed25519KeyHash.from_hex(
                     addressDetails.stakeCredential.hash,
                   ),
@@ -399,7 +399,7 @@ export class Lucid {
             }
             return CML.RewardAddress.new(
               this.network === "Mainnet" ? 1 : 0,
-              CML.StakeCredential.from_scripthash(
+              CML.Credential.new_script(
                 CML.ScriptHash.from_hex(addressDetails.stakeCredential.hash),
               ),
             )
