@@ -1,4 +1,5 @@
 import { C } from "../core/mod.ts";
+import { CML } from "../core/mod.ts";
 import { Data } from "../mod.ts";
 import {
   Address,
@@ -38,7 +39,7 @@ import { Lucid } from "./lucid.ts";
 import { TxComplete } from "./tx_complete.ts";
 
 export class Tx {
-  txBuilder: C.TransactionBuilder;
+  txBuilder: CML.TransactionBuilder;
   /** Stores the tx instructions, which get executed after calling .complete() */
   private tasks: ((that: Tx) => unknown)[];
   protected lucid: Lucid;
@@ -47,7 +48,7 @@ export class Tx {
 
   constructor(lucid: Lucid) {
     this.lucid = lucid;
-    this.txBuilder = C.TransactionBuilder.new(this.lucid.txBuilderConfig);
+    this.txBuilder = CML.TransactionBuilder.new(this.lucid.txBuilderConfig);
     this.tasks = [];
   }
 
@@ -79,6 +80,7 @@ export class Tx {
           utxo.datum = Data.to(await that.lucid.datumOf(utxo));
         }
         const coreUtxo = utxoToCore(utxo);
+        // TODO: Waiting for https://github.com/dcSpark/cardano-multiplatform-lib/issues/297 to be fixed
         that.txBuilder.add_input(
           coreUtxo,
           (redeemer as undefined) &&
