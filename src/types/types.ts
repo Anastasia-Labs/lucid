@@ -1,5 +1,5 @@
 import { C } from "../core/mod.ts";
-import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
+import { CML } from "../core/mod.ts"
 type CostModel = Record<string, number>;
 
 export type CostModels = Record<PlutusVersion, CostModel>;

@@ -1,5 +1,5 @@
 import { C } from "../core/mod.ts";
-import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
+import { CML } from "../core/mod.ts"
 import { Transaction, TxHash } from "../types/mod.ts";
 import { Lucid } from "./lucid.ts";
 import { toHex } from "../utils/mod.ts";

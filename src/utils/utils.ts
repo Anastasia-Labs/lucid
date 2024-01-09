@@ -4,7 +4,7 @@ import {
   encodeToString,
 } from "https://deno.land/std@0.100.0/encoding/hex.ts";
 import { C } from "../core/mod.ts";
-import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.1"
+import { CML } from "../core/mod.ts"
 import { Lucid, TxComplete } from "../lucid/mod.ts";
 import { generateMnemonic } from "../misc/bip39.ts";
 import { crc8 } from "../misc/crc8.ts";

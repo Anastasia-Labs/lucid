@@ -1,5 +1,6 @@
 import * as C from "./libs/cardano_multiplatform_lib/cardano_multiplatform_lib.generated.js";
 import * as M from "./libs/cardano_message_signing/cardano_message_signing.generated.js";
+import * as CML from "npm:@dcspark/cardano-multiplatform-lib-nodejs@4.0.2"
 import packageJson from "../../package.json" assert { type: "json" };
 
 async function unsafeInstantiate(module: any, url: string) {
@@ -27,4 +28,4 @@ await Promise.all([
   ),
 ]);
 
-export { C, M };
+export { C, M , CML};
