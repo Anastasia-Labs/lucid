@@ -40,6 +40,7 @@
             cargo-edit
             cargo-watch
             rust-analyzer
+            wasm-pack
             deno
           ];
         };
