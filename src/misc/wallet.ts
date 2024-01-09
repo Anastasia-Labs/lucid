@@ -1,6 +1,7 @@
 import {
   Address,
   C,
+  CML,
   fromHex,
   getAddressDetails,
   KeyHash,
@@ -34,7 +35,7 @@ export function walletFromSeed(
   }
 
   const entropy = mnemonicToEntropy(seed);
-  const rootKey = C.Bip32PrivateKey.from_bip39_entropy(
+  const rootKey = CML.Bip32PrivateKey.from_bip39_entropy(
     fromHex(entropy),
     options.password
       ? new TextEncoder().encode(options.password)
@@ -54,20 +55,20 @@ export function walletFromSeed(
   const networkId = options.network === "Mainnet" ? 1 : 0;
 
   const address = options.addressType === "Base"
-    ? C.BaseAddress.new(
+    ? CML.BaseAddress.new(
       networkId,
-      C.StakeCredential.from_keyhash(paymentKeyHash),
-      C.StakeCredential.from_keyhash(stakeKeyHash),
+      CML.Credential.new_pub_key(paymentKeyHash),
+      CML.Credential.new_pub_key(stakeKeyHash),
     ).to_address().to_bech32(undefined)
-    : C.EnterpriseAddress.new(
+    : CML.EnterpriseAddress.new(
       networkId,
-      C.StakeCredential.from_keyhash(paymentKeyHash),
+      CML.Credential.new_pub_key(paymentKeyHash),
     ).to_address().to_bech32(undefined);
 
   const rewardAddress = options.addressType === "Base"
-    ? C.RewardAddress.new(
+    ? CML.RewardAddress.new(
       networkId,
-      C.StakeCredential.from_keyhash(stakeKeyHash),
+      CML.Credential.new_pub_key(stakeKeyHash),
     ).to_address().to_bech32(undefined)
     : null;
 
@@ -80,7 +81,7 @@ export function walletFromSeed(
 }
 
 export function discoverOwnUsedTxKeyHashes(
-  tx: C.Transaction,
+  tx: CML.Transaction,
   ownKeyHashes: Array<KeyHash>,
   ownUtxos: Array<UTxO>,
 ): Array<KeyHash> {
@@ -90,8 +91,8 @@ export function discoverOwnUsedTxKeyHashes(
   const inputs = tx.body().inputs();
   for (let i = 0; i < inputs.len(); i++) {
     const input = inputs.get(i);
-    const txHash = toHex(input.transaction_id().to_bytes());
-    const outputIndex = parseInt(input.index().to_str());
+    const txHash = input.transaction_id().to_hex()
+    const outputIndex = Number(input.index())
     const utxo = ownUtxos.find(
       (utxo) => utxo.txHash === txHash && utxo.outputIndex === outputIndex,
     );
@@ -106,7 +107,7 @@ export function discoverOwnUsedTxKeyHashes(
   const txBody = tx.body();
 
   // key hashes from certificates
-  function keyHashFromCert(txBody: C.TransactionBody) {
+  function keyHashFromCert(txBody: CML.TransactionBody) {
     const certs = txBody.certs();
     if (!certs) return;
     for (let i = 0; i < certs.len(); i++) {
@@ -119,17 +120,13 @@ export function discoverOwnUsedTxKeyHashes(
       } else if (cert.kind() === 1) {
         const credential = cert.as_stake_deregistration()?.stake_credential();
         if (credential?.kind() === 0) {
-          const keyHash = toHex(
-            credential.to_keyhash()!.to_bytes(),
-          );
+          const keyHash = credential.to_cbor_hex()
           usedKeyHashes.push(keyHash);
         }
       } else if (cert.kind() === 2) {
         const credential = cert.as_stake_delegation()?.stake_credential();
         if (credential?.kind() === 0) {
-          const keyHash = toHex(
-            credential.to_keyhash()!.to_bytes(),
-          );
+          const keyHash = credential.to_cbor_hex()
           usedKeyHashes.push(keyHash);
         }
       } else if (cert.kind() === 3) {
@@ -139,29 +136,18 @@ export function discoverOwnUsedTxKeyHashes(
           ?.pool_owners();
         if (!owners) break;
         for (let i = 0; i < owners.len(); i++) {
-          const keyHash = toHex(owners.get(i).to_bytes());
+          const keyHash = owners.get(i).to_hex()
           usedKeyHashes.push(keyHash);
         }
         const operator = poolParams.operator().to_hex();
         usedKeyHashes.push(operator);
       } else if (cert.kind() === 4) {
-        const operator = cert.as_pool_retirement()!.pool_keyhash().to_hex();
+        const operator = cert.as_pool_retirement()?.ed25519_key_hash().to_hex()
         usedKeyHashes.push(operator);
       } else if (cert.kind() === 6) {
-        const instantRewards = cert
-          .as_move_instantaneous_rewards_cert()
-          ?.move_instantaneous_reward().as_to_stake_creds()
-          ?.keys();
-        if (!instantRewards) break;
-        for (let i = 0; i < instantRewards.len(); i++) {
-          const credential = instantRewards.get(i);
-
-          if (credential.kind() === 0) {
-            const keyHash = toHex(
-              credential.to_keyhash()!.to_bytes(),
-            );
-            usedKeyHashes.push(keyHash);
-          }
+        const credential = cert.as_unreg_cert()?.stake_credential()
+        if (credential){
+          usedKeyHashes.push(credential.to_cbor_hex())
         }
       }
     }
@@ -171,12 +157,12 @@ export function discoverOwnUsedTxKeyHashes(
   // key hashes from withdrawals
 
   const withdrawals = txBody.withdrawals();
-  function keyHashFromWithdrawal(withdrawals: C.Withdrawals) {
+  function keyHashFromWithdrawal(withdrawals: CML.MapRewardAccountToCoin) {
     const rewardAddresses = withdrawals.keys();
     for (let i = 0; i < rewardAddresses.len(); i++) {
-      const credential = rewardAddresses.get(i).payment_cred();
+      const credential = rewardAddresses.get(i).payment();
       if (credential.kind() === 0) {
-        usedKeyHashes.push(credential.to_keyhash()!.to_hex());
+        usedKeyHashes.push(credential.to_cbor_hex())
       }
     }
   }
@@ -184,13 +170,11 @@ export function discoverOwnUsedTxKeyHashes(
 
   // key hashes from scripts
   const scripts = tx.witness_set().native_scripts();
-  function keyHashFromScript(scripts: C.NativeScripts) {
+  function keyHashFromScript(scripts: CML.NativeScriptList) {
     for (let i = 0; i < scripts.len(); i++) {
       const script = scripts.get(i);
       if (script.kind() === 0) {
-        const keyHash = toHex(
-          script.as_script_pubkey()!.addr_keyhash().to_bytes(),
-        );
+        const keyHash =  script.as_script_pubkey()?.ed25519_key_hash().to_hex()
         usedKeyHashes.push(keyHash);
       }
       if (script.kind() === 1) {
@@ -213,19 +197,17 @@ export function discoverOwnUsedTxKeyHashes(
   const requiredSigners = txBody.required_signers();
   if (requiredSigners) {
     for (let i = 0; i < requiredSigners.len(); i++) {
-      usedKeyHashes.push(
-        toHex(requiredSigners.get(i).to_bytes()),
-      );
+      usedKeyHashes.push(requiredSigners.get(i).to_hex());
     }
   }
 
   // keyHashes from collateral
-  const collateral = txBody.collateral();
+  const collateral = txBody.collateral_inputs();
   if (collateral) {
     for (let i = 0; i < collateral.len(); i++) {
       const input = collateral.get(i);
-      const txHash = toHex(input.transaction_id().to_bytes());
-      const outputIndex = parseInt(input.index().to_str());
+      const txHash = input.transaction_id().to_hex()
+      const outputIndex = Number(input.index())
       const utxo = ownUtxos.find(
         (utxo) => utxo.txHash === txHash && utxo.outputIndex === outputIndex,
       );
