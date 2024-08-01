@@ -60,6 +60,15 @@ pub struct Blockfrost {
 }
 
 #[wasm_bindgen]
+#[derive(
+    Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+pub struct Maestro {
+    url: String,
+    api_key: String,
+}
+
+#[wasm_bindgen]
 impl Blockfrost {
     pub fn new(url: String, project_id: String) -> Self {
         Self {
@@ -72,6 +81,22 @@ impl Blockfrost {
     }
     pub fn project_id(&self) -> String {
         self.project_id.clone()
+    }
+}
+
+#[wasm_bindgen]
+impl Maestro {
+    pub fn new(url: String, api_key: String) -> Self {
+        Self {
+            url: url.clone(),
+            api_key: api_key.clone(),
+        }
+    }
+    pub fn url(&self) -> String {
+        self.url.clone()
+    }
+    pub fn api_key(&self) -> String {
+        self.api_key.clone()
     }
 }
 
@@ -143,6 +168,14 @@ pub async fn get_ex_units_blockfrost(
     Ok(Redeemers::new())
 }
 
+#[cfg(not(all(target_arch = "wasm32", not(target_os = "emscripten"))))]
+pub async fn get_ex_units_maestro(
+    tx: Transaction,
+    ms: &Maestro,
+) -> Result<Redeemers, JsError> {
+    Ok(Redeemers::new())
+}
+
 #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
 pub async fn get_ex_units_blockfrost(
     tx: Transaction,
@@ -164,6 +197,87 @@ pub async fn get_ex_units_blockfrost(
     let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Content-Type", "application/cbor")?;
     request.headers().set("project_id", &bf.project_id)?;
+
+    let window = js_sys::global().unchecked_into::<globalThis>();
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+
+    // `resp_value` is a `Response` object.
+    assert!(resp_value.is_instance_of::<Response>());
+    let resp: Response = resp_value.dyn_into().unwrap();
+
+    // Convert this other `Promise` into a rust `Future`.
+    let json = JsFuture::from(resp.json()?).await?;
+
+    // Use serde to parse the JSON into a struct.
+    let redeemer_result: RedeemerResult = json.into_serde().unwrap();
+
+    match redeemer_result.result {
+        Some(res) => {
+            if let Some(e) = &res.EvaluationFailure {
+                return Err(JsError::from_str(
+                    &serde_json::to_string_pretty(&e).unwrap(),
+                ));
+            }
+            let mut redeemers: BTreeMap<RedeemerWitnessKey, Redeemer> = BTreeMap::new();
+            for (pointer, eu) in &res.EvaluationResult.unwrap() {
+                let r: Vec<&str> = pointer.split(":").collect();
+                let tag = match r[0] {
+                    "spend" => RedeemerTag::new_spend(),
+                    "mint" => RedeemerTag::new_mint(),
+                    "certificate" => RedeemerTag::new_cert(),
+                    "withdrawal" => RedeemerTag::new_reward(),
+                    _ => return Err(JsValue::NULL),
+                };
+                let index = &to_bignum(r[1].parse::<u64>().unwrap());
+                let ex_units = ExUnits::new(&to_bignum(eu.memory), &to_bignum(eu.steps));
+
+                for tx_redeemer in &tx.witness_set.redeemers.clone().unwrap().0 {
+                    if tx_redeemer.tag() == tag && tx_redeemer.index() == *index {
+                        let updated_redeemer = Redeemer::new(
+                            &tx_redeemer.tag(),
+                            &tx_redeemer.index(),
+                            &tx_redeemer.data(),
+                            &ex_units,
+                        );
+                        redeemers.insert(
+                            RedeemerWitnessKey::new(
+                                &updated_redeemer.tag(),
+                                &updated_redeemer.index(),
+                            ),
+                            updated_redeemer.clone(),
+                        );
+                    }
+                }
+            }
+
+            Ok(Redeemers(redeemers.values().cloned().collect()))
+        }
+
+        None => Err(JsValue::NULL),
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
+pub async fn get_ex_units_maestro(
+    tx: Transaction,
+    ms: &Maestro,
+) -> Result<Redeemers, JsError> {
+    if ms.url.is_empty() || ms.api_key.is_empty() {
+        return Err(JsError::from_str(
+            "Maestro not set. Can't calculate ex units",
+        ));
+    }
+
+    let mut opts = RequestInit::new();
+    opts.method("POST");
+    let tx_hex = hex::encode(tx.to_bytes());
+    opts.body(Some(&JsValue::from(tx_hex)));
+
+    let url = &ms.url;
+
+    let request = Request::new_with_str_and_init(&url, &opts)?;
+    request.headers().set("Content-Type", "application/cbor")?;
+    request.headers().set("api_key", &ms.api_key)?;
 
     let window = js_sys::global().unchecked_into::<globalThis>();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;

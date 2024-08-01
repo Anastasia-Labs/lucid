@@ -311,6 +311,7 @@ pub struct TransactionBuilderConfig {
     max_collateral_inputs: u32,         // protocol parameter
     slot_config: (BigNum, BigNum, u32), // (zero_time, zero_slot, slot_length)
     blockfrost: Blockfrost,
+    maestro: Maestro,
 }
 
 #[wasm_bindgen]
@@ -329,6 +330,7 @@ pub struct TransactionBuilderConfigBuilder {
     max_collateral_inputs: Option<u32>,         // protocol parameter
     slot_config: Option<(BigNum, BigNum, u32)>, // (zero_time, zero_slot, slot_length)
     blockfrost: Option<Blockfrost>,
+    maestro: Option<Maestro>,
 }
 
 #[wasm_bindgen]
@@ -348,6 +350,7 @@ impl TransactionBuilderConfigBuilder {
             max_collateral_inputs: None,
             slot_config: None,
             blockfrost: None,
+            maestro: None,
         }
     }
 
@@ -429,6 +432,12 @@ impl TransactionBuilderConfigBuilder {
         cfg
     }
 
+    pub fn maestro(&self, maestro: &Maestro) -> Self {
+        let mut cfg = self.clone();
+        cfg.maestro = Some(maestro.clone());
+        cfg
+    }
+
     pub fn build(&self) -> Result<TransactionBuilderConfig, JsError> {
         let cfg = self.clone();
         Ok(TransactionBuilderConfig {
@@ -478,6 +487,11 @@ impl TransactionBuilderConfigBuilder {
                 cfg.blockfrost.unwrap()
             } else {
                 Blockfrost::new("".to_string(), "".to_string())
+            },
+            maestro: if cfg.maestro.is_some() {
+                cfg.maestro.unwrap()
+            } else {
+                Maestro::new("".to_string(), "".to_string())
             },
         })
     }
