@@ -2568,7 +2568,13 @@ impl TransactionBuilder {
                         this.config.slot_config,
                     )?
                 } else {
-                    get_ex_units_blockfrost(full_tx.clone(), &this.config.blockfrost).await?
+                    if (&this.config.blockfrost).url().is_empty()
+                        || (&this.config.blockfrost).project_id().is_empty()
+                    {
+                        get_ex_units_maestro(full_tx.clone(), &this.config.maestro).await?
+                    } else {
+                        get_ex_units_blockfrost(full_tx.clone(), &this.config.blockfrost).await?
+                    }
                 };
                 this.redeemers = Some(updated_redeemers);
 

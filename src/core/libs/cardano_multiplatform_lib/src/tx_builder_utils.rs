@@ -39,6 +39,13 @@ pub struct RedeemerResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MaestroRedeemerResult {
+    pub ex_units: MaestroExUnitResult,
+    pub redeemer_index: u64,
+    pub redeemer_tag: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EvaluationResult {
     pub EvaluationResult: Option<HashMap<String, ExUnitResult>>,
     pub EvaluationFailure: Option<serde_json::Value>,
@@ -47,6 +54,12 @@ pub struct EvaluationResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExUnitResult {
     pub memory: u64,
+    pub steps: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaestroExUnitResult {
+    pub mem: u64,
     pub steps: u64,
 }
 
@@ -169,10 +182,7 @@ pub async fn get_ex_units_blockfrost(
 }
 
 #[cfg(not(all(target_arch = "wasm32", not(target_os = "emscripten"))))]
-pub async fn get_ex_units_maestro(
-    tx: Transaction,
-    ms: &Maestro,
-) -> Result<Redeemers, JsError> {
+pub async fn get_ex_units_maestro(tx: Transaction, ms: &Maestro) -> Result<Redeemers, JsError> {
     Ok(Redeemers::new())
 }
 
@@ -258,10 +268,7 @@ pub async fn get_ex_units_blockfrost(
 }
 
 #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
-pub async fn get_ex_units_maestro(
-    tx: Transaction,
-    ms: &Maestro,
-) -> Result<Redeemers, JsError> {
+pub async fn get_ex_units_maestro(tx: Transaction, ms: &Maestro) -> Result<Redeemers, JsError> {
     if ms.url.is_empty() || ms.api_key.is_empty() {
         return Err(JsError::from_str(
             "Maestro not set. Can't calculate ex units",
@@ -271,12 +278,13 @@ pub async fn get_ex_units_maestro(
     let mut opts = RequestInit::new();
     opts.method("POST");
     let tx_hex = hex::encode(tx.to_bytes());
-    opts.body(Some(&JsValue::from(tx_hex)));
+    let body = serde_json::json!({ "cbor": tx_hex }).to_string();
+    opts.body(Some(&JsValue::from_str(&body)));
 
     let url = &ms.url;
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
-    request.headers().set("Content-Type", "application/cbor")?;
+    request.headers().set("Content-Type", "application/json")?;
     request.headers().set("api_key", &ms.api_key)?;
 
     let window = js_sys::global().unchecked_into::<globalThis>();
@@ -290,52 +298,36 @@ pub async fn get_ex_units_maestro(
     let json = JsFuture::from(resp.json()?).await?;
 
     // Use serde to parse the JSON into a struct.
-    let redeemer_result: RedeemerResult = json.into_serde().unwrap();
+    let redeemer_result: Vec<MaestroRedeemerResult> = json.into_serde().unwrap();
 
-    match redeemer_result.result {
-        Some(res) => {
-            if let Some(e) = &res.EvaluationFailure {
-                return Err(JsError::from_str(
-                    &serde_json::to_string_pretty(&e).unwrap(),
-                ));
+    let mut redeemers: BTreeMap<RedeemerWitnessKey, Redeemer> = BTreeMap::new();
+    for res in &redeemer_result {
+        let tag = match res.redeemer_tag.as_str() {
+            "spend" => RedeemerTag::new_spend(),
+            "mint" => RedeemerTag::new_mint(),
+            "cert" => RedeemerTag::new_cert(),
+            "wdrl" => RedeemerTag::new_reward(),
+            _ => return Err(JsValue::NULL),
+        };
+        let index = &to_bignum(res.redeemer_index);
+        let ex_units = ExUnits::new(&to_bignum(res.ex_units.mem), &to_bignum(res.ex_units.steps));
+
+        for tx_redeemer in &tx.witness_set.redeemers.clone().unwrap().0 {
+            if tx_redeemer.tag() == tag && tx_redeemer.index() == *index {
+                let updated_redeemer = Redeemer::new(
+                    &tx_redeemer.tag(),
+                    &tx_redeemer.index(),
+                    &tx_redeemer.data(),
+                    &ex_units,
+                );
+                redeemers.insert(
+                    RedeemerWitnessKey::new(&updated_redeemer.tag(), &updated_redeemer.index()),
+                    updated_redeemer.clone(),
+                );
             }
-            let mut redeemers: BTreeMap<RedeemerWitnessKey, Redeemer> = BTreeMap::new();
-            for (pointer, eu) in &res.EvaluationResult.unwrap() {
-                let r: Vec<&str> = pointer.split(":").collect();
-                let tag = match r[0] {
-                    "spend" => RedeemerTag::new_spend(),
-                    "mint" => RedeemerTag::new_mint(),
-                    "certificate" => RedeemerTag::new_cert(),
-                    "withdrawal" => RedeemerTag::new_reward(),
-                    _ => return Err(JsValue::NULL),
-                };
-                let index = &to_bignum(r[1].parse::<u64>().unwrap());
-                let ex_units = ExUnits::new(&to_bignum(eu.memory), &to_bignum(eu.steps));
-
-                for tx_redeemer in &tx.witness_set.redeemers.clone().unwrap().0 {
-                    if tx_redeemer.tag() == tag && tx_redeemer.index() == *index {
-                        let updated_redeemer = Redeemer::new(
-                            &tx_redeemer.tag(),
-                            &tx_redeemer.index(),
-                            &tx_redeemer.data(),
-                            &ex_units,
-                        );
-                        redeemers.insert(
-                            RedeemerWitnessKey::new(
-                                &updated_redeemer.tag(),
-                                &updated_redeemer.index(),
-                            ),
-                            updated_redeemer.clone(),
-                        );
-                    }
-                }
-            }
-
-            Ok(Redeemers(redeemers.values().cloned().collect()))
         }
-
-        None => Err(JsValue::NULL),
     }
+    Ok(Redeemers(redeemers.values().cloned().collect()))
 }
 
 #[wasm_bindgen]

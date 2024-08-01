@@ -102,13 +102,21 @@ export class Lucid {
           C.BigNum.from_str(slotConfig.zeroSlot.toString()),
           slotConfig.slotLength,
         )
+        // We have Aiken now as native plutus core engine (primary), but we still support blockfrost or maestro (as secondary) in case of bugs.
         .blockfrost(
-          // We have Aiken now as native plutus core engine (primary), but we still support blockfrost (secondary) in case of bugs.
           C.Blockfrost.new(
             // deno-lint-ignore no-explicit-any
             ((provider as any)?.url || "") + "/utils/txs/evaluate",
             // deno-lint-ignore no-explicit-any
             (provider as any)?.projectId || "",
+          ),
+        )
+        .maestro(
+          C.Maestro.new(
+            // deno-lint-ignore no-explicit-any
+            ((provider as any)?.url || "") + "/transactions/evaluate",
+            // deno-lint-ignore no-explicit-any
+            (provider as any)?.apiKey || "",
           ),
         )
         .costmdls(createCostModels(protocolParameters.costModels))
