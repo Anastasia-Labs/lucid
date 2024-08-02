@@ -1,3 +1,10 @@
+
+# ⚠️ The old lucid is not longer maintain, please checkout [lucid-evolution](https://github.com/Anastasia-Labs/lucid-evolution)
+
+
+----
+
+
 <p align="center">
   <img width="100px" src="./logo/lucid.svg" align="center"/>
   <h1 align="center">Lucid</h1>
