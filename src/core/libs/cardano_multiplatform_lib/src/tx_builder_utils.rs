@@ -39,6 +39,13 @@ pub struct RedeemerResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MaestroRedeemerResult {
+    pub ex_units: MaestroExUnitResult,
+    pub redeemer_index: u64,
+    pub redeemer_tag: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EvaluationResult {
     pub EvaluationResult: Option<HashMap<String, ExUnitResult>>,
     pub EvaluationFailure: Option<serde_json::Value>,
@@ -50,6 +57,12 @@ pub struct ExUnitResult {
     pub steps: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaestroExUnitResult {
+    pub mem: u64,
+    pub steps: u64,
+}
+
 #[wasm_bindgen]
 #[derive(
     Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize, JsonSchema,
@@ -57,6 +70,15 @@ pub struct ExUnitResult {
 pub struct Blockfrost {
     url: String,
     project_id: String,
+}
+
+#[wasm_bindgen]
+#[derive(
+    Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+pub struct Maestro {
+    url: String,
+    api_key: String,
 }
 
 #[wasm_bindgen]
@@ -72,6 +94,22 @@ impl Blockfrost {
     }
     pub fn project_id(&self) -> String {
         self.project_id.clone()
+    }
+}
+
+#[wasm_bindgen]
+impl Maestro {
+    pub fn new(url: String, api_key: String) -> Self {
+        Self {
+            url: url.clone(),
+            api_key: api_key.clone(),
+        }
+    }
+    pub fn url(&self) -> String {
+        self.url.clone()
+    }
+    pub fn api_key(&self) -> String {
+        self.api_key.clone()
     }
 }
 
@@ -140,6 +178,11 @@ pub async fn get_ex_units_blockfrost(
     tx: Transaction,
     bf: &Blockfrost,
 ) -> Result<Redeemers, JsError> {
+    Ok(Redeemers::new())
+}
+
+#[cfg(not(all(target_arch = "wasm32", not(target_os = "emscripten"))))]
+pub async fn get_ex_units_maestro(tx: Transaction, ms: &Maestro) -> Result<Redeemers, JsError> {
     Ok(Redeemers::new())
 }
 
@@ -222,6 +265,69 @@ pub async fn get_ex_units_blockfrost(
 
         None => Err(JsValue::NULL),
     }
+}
+
+#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
+pub async fn get_ex_units_maestro(tx: Transaction, ms: &Maestro) -> Result<Redeemers, JsError> {
+    if ms.url.is_empty() || ms.api_key.is_empty() {
+        return Err(JsError::from_str(
+            "Maestro not set. Can't calculate ex units",
+        ));
+    }
+
+    let mut opts = RequestInit::new();
+    opts.method("POST");
+    let tx_hex = hex::encode(tx.to_bytes());
+    let body = serde_json::json!({ "cbor": tx_hex }).to_string();
+    opts.body(Some(&JsValue::from_str(&body)));
+
+    let url = &ms.url;
+
+    let request = Request::new_with_str_and_init(&url, &opts)?;
+    request.headers().set("Content-Type", "application/json")?;
+    request.headers().set("api-key", &ms.api_key)?;
+
+    let window = js_sys::global().unchecked_into::<globalThis>();
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+
+    // `resp_value` is a `Response` object.
+    assert!(resp_value.is_instance_of::<Response>());
+    let resp: Response = resp_value.dyn_into().unwrap();
+
+    // Convert this other `Promise` into a rust `Future`.
+    let json = JsFuture::from(resp.json()?).await?;
+
+    // Use serde to parse the JSON into a struct.
+    let redeemer_result: Vec<MaestroRedeemerResult> = json.into_serde().unwrap();
+
+    let mut redeemers: BTreeMap<RedeemerWitnessKey, Redeemer> = BTreeMap::new();
+    for res in &redeemer_result {
+        let tag = match res.redeemer_tag.as_str() {
+            "spend" => RedeemerTag::new_spend(),
+            "mint" => RedeemerTag::new_mint(),
+            "cert" => RedeemerTag::new_cert(),
+            "wdrl" => RedeemerTag::new_reward(),
+            _ => return Err(JsValue::NULL),
+        };
+        let index = &to_bignum(res.redeemer_index);
+        let ex_units = ExUnits::new(&to_bignum(res.ex_units.mem), &to_bignum(res.ex_units.steps));
+
+        for tx_redeemer in &tx.witness_set.redeemers.clone().unwrap().0 {
+            if tx_redeemer.tag() == tag && tx_redeemer.index() == *index {
+                let updated_redeemer = Redeemer::new(
+                    &tx_redeemer.tag(),
+                    &tx_redeemer.index(),
+                    &tx_redeemer.data(),
+                    &ex_units,
+                );
+                redeemers.insert(
+                    RedeemerWitnessKey::new(&updated_redeemer.tag(), &updated_redeemer.index()),
+                    updated_redeemer.clone(),
+                );
+            }
+        }
+    }
+    Ok(Redeemers(redeemers.values().cloned().collect()))
 }
 
 #[wasm_bindgen]
