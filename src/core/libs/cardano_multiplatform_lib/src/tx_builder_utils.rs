@@ -285,7 +285,7 @@ pub async fn get_ex_units_maestro(tx: Transaction, ms: &Maestro) -> Result<Redee
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Content-Type", "application/json")?;
-    request.headers().set("api_key", &ms.api_key)?;
+    request.headers().set("api-key", &ms.api_key)?;
 
     let window = js_sys::global().unchecked_into::<globalThis>();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
